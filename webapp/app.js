@@ -1,6 +1,16 @@
 // После деплоя на Render замените на реальный URL, например:
 // const API = "https://meteovip.onrender.com";
-const API = "http://localhost:3000";
+function getApiBase() {
+  const url = new URL(window.location.href);
+  const fromQuery = url.searchParams.get('api');
+  if (fromQuery) {
+    localStorage.setItem('apiBase', fromQuery);
+    return fromQuery;
+  }
+  return localStorage.getItem('apiBase') || 'http://localhost:3000';
+}
+
+const API = getApiBase();
 
 const tg = window.Telegram?.WebApp;
 tg?.ready();
