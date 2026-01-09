@@ -42,14 +42,15 @@ app.post('/api/settings', (req, res) => {
 const bot = new Telegraf(BOT_TOKEN);
 
 bot.start(async (ctx) => {
-  const text =
-    `MeteoVip\n\n` +
-    `Откройте Mini App и выберите город/профиль оповещений.`;
+  const text = 'Привет! Это MeteoVip. Нажми кнопку ниже, чтобы открыть настройки.';
+  const apiBase = process.env.API_PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '';
+  const webappUrl = new URL(WEBAPP_URL);
+  if (apiBase) webappUrl.searchParams.set('api', apiBase);
 
   await ctx.reply(
     text,
     Markup.inlineKeyboard([
-      Markup.button.webApp('Открыть MeteoVip', WEBAPP_URL)
+      Markup.button.webApp('Открыть MeteoVip', webappUrl.toString())
     ])
   );
 });
@@ -61,26 +62,16 @@ const USE_WEBHOOK = (process.env.USE_WEBHOOK || 'true').toLowerCase() === 'true'
 
 if (USE_WEBHOOK) {
   const publicUrl = process.env.RENDER_EXTERNAL_URL;
-  if (!publicUrl) {
-    console.warn('RENDER_EXTERNAL_URL not found. Webhook may not be set automatically.');
-  }
+  const path = '/telegram';
 
-  const webhookMiddleware = await bot.createWebhook({
-    domain: publicUrl || undefined,
-    path: '/telegram'
-  });
+  if (!publicUrl) console.warn('RENDER_EXTERNAL_URL not found');
 
-  app.use(webhookMiddleware);
-  app.post('/telegram', (req, res) => res.sendStatus(200));
+  app.post(path, (req, res) => bot.handleUpdate(req.body, res));
+  bot.telegram.setWebhook(`${publicUrl}${path}`).catch(console.error);
 
-  app.listen(PORT, () => {
-    console.log(`API listening on ${PORT}`);
-    console.log(`Webhook path: /telegram`);
-  });
-} else {
-  bot.launch();
   app.listen(PORT, () => console.log(`API listening on ${PORT}`));
-
-  process.once('SIGINT', () => bot.stop('SIGINT'));
-  process.once('SIGTERM', () => bot.stop('SIGTERM'));
+} else {
+  bot.launch().then(() => {
+    app.listen(PORT, () => console.log(`API listening on ${PORT}`));
+  });
 }
