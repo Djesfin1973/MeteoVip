@@ -13,7 +13,7 @@ const WEBAPP_URL = process.env.WEBAPP_URL || 'https://example.netlify.app';
 const userSettings = new Map();
 
 const app = express();
-app.use(cors({ origin: ['https://inquisitive-bublanina-86a647.netlify.app'], credentials: true }))(
+app.use(cors({ origin: ['https://inquisitive-bublanina-86a647.netlify.app'], credentials: true });
 app.use(express.json());
 
 // --- API ---
