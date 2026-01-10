@@ -1,0 +1,111 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Plan {
+  FREE
+  PREMIUM
+}
+
+enum LocationTag {
+  FAVORITE
+  HOME
+}
+
+enum RuleScope {
+  ACTIVE
+  HOME
+}
+
+enum RuleType {
+  TEMP_GT
+  WIND_GT
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  telegramId   String   @unique
+  username     String?
+  firstName    String?
+  languageCode String   @default("ru")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  subscription Subscription?
+  state        UserState?
+  favorites    FavoriteLocation[]
+  rules        AlertRule[]
+  logs         NotificationLog[]
+}
+
+model Subscription {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique
+  plan      Plan     @default(FREE)
+  validTill DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserState {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique
+  activeLat Float?
+  activeLon Float?
+  activeName String?
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model FavoriteLocation {
+  id        Int         @id @default(autoincrement())
+  userId    Int
+  tag       LocationTag @default(FAVORITE)
+  name      String
+  lat       Float
+  lon       Float
+  createdAt DateTime    @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@unique([userId, tag]) // гарантирует ровно 1 HOME на пользователя
+}
+
+model AlertRule {
+  id              Int       @id @default(autoincrement())
+  userId          Int
+  scope           RuleScope
+  type            RuleType
+  threshold       Float
+  isEnabled       Boolean   @default(true)
+  cooldownMinutes Int       @default(180)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isEnabled])
+}
+
+model NotificationLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  ruleId    Int
+  dedupeKey String
+  message   String
+  sentAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, ruleId, sentAt])
+  @@unique([dedupeKey])
+}
