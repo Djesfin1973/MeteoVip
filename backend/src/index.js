@@ -13,11 +13,12 @@ const WEBAPP_URL = process.env.WEBAPP_URL || 'https://example.netlify.app';
 const userSettings = new Map();
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: ['https://inquisitive-bublanina-86a647.netlify.app'], credentials: true }))());
 app.use(express.json());
 
 // --- API ---
 app.get('/health', (req, res) => res.json({ ok: true }));
+app.get('/', (req, res) => res.json({ ok: true, service: 'MeteoVip API' }));
 
 app.get('/api/settings/:telegramId', (req, res) => {
   const telegramId = String(req.params.telegramId);
