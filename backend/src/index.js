@@ -11,9 +11,13 @@ const WEBAPP_URL = process.env.WEBAPP_URL || 'https://example.netlify.app';
 
 // Для старта без БД: храним настройки в памяти (обнулится при перезапуске)
 const userSettings = new Map();
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 
 const app = express();
-app.use(cors({ origin: ['https://inquisitive-bublanina-86a647.netlify.app'], credentials: true }));
+app.use(cors({
+  origin: CORS_ORIGINS.length ? CORS_ORIGINS : true,
+  credentials: true
+}));
 app.use(express.json());
 
 // --- API ---
@@ -28,13 +32,13 @@ app.get('/api/settings/:telegramId', (req, res) => {
 app.post('/api/settings', (req, res) => {
   const { telegramId, city, profile } = req.body || {};
   if (!telegramId) return res.status(400).json({ error: 'telegramId is required' });
-
+  
   const data = {
     telegramId: String(telegramId),
     city: city ? String(city).trim() : null,
     profile: profile ? String(profile) : 'office'
   };
-
+  
   userSettings.set(String(telegramId), data);
   res.json({ ok: true, data });
 });
@@ -47,7 +51,7 @@ bot.start(async (ctx) => {
   const apiBase = process.env.API_PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '';
   const webappUrl = new URL(WEBAPP_URL);
   if (apiBase) webappUrl.searchParams.set('api', apiBase);
-
+  
   await ctx.reply(
     text,
     Markup.inlineKeyboard([
@@ -64,12 +68,10 @@ const USE_WEBHOOK = (process.env.USE_WEBHOOK || 'true').toLowerCase() === 'true'
 if (USE_WEBHOOK) {
   const publicUrl = process.env.RENDER_EXTERNAL_URL;
   const path = '/telegram';
-
   if (!publicUrl) console.warn('RENDER_EXTERNAL_URL not found');
-
+  
   app.post(path, (req, res) => bot.handleUpdate(req.body, res));
   bot.telegram.setWebhook(`${publicUrl}${path}`).catch(console.error);
-
   app.listen(PORT, () => console.log(`API listening on ${PORT}`));
 } else {
   bot.launch().then(() => {
