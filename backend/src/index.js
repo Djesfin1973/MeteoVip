@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { Telegraf, Markup } from 'telegraf';
+import { validateInitData } from './telegramInitData.js';
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 if (!BOT_TOKEN) throw new Error('BOT_TOKEN is required');
@@ -39,6 +40,24 @@ app.use(
   })
 );
 
+// Middleware для проверки Telegram initData
+function requireTelegramUser(req, res, next) {
+  try {
+    const initData =
+      req.headers['x-telegram-init-data'] ||
+      req.body?.initData ||
+      req.query?.initData;
+
+    const result = validateInitData(initData, process.env.BOT_TOKEN);
+    if (!result.user?.id) return res.status(401).json({ error: 'No user in initData' });
+
+    req.tg = { user: result.user, initData: result.data };
+    next();
+  } catch (e) {
+    return res.status(401).json({ error: String(e.message || e) });
+  }
+}
+
 // --- Для старта без БД: храним настройки в памяти (обнулится при перезапуске)
 const userSettings = new Map();
 
@@ -46,22 +65,22 @@ const userSettings = new Map();
 app.get('/health', (req, res) => res.json({ ok: true }));
 app.get('/', (req, res) => res.json({ ok: true, service: 'MeteoVip API' }));
 
-app.get('/api/settings/:telegramId', (req, res) => {
-  const telegramId = String(req.params.telegramId);
+app.get('/api/settings', requireTelegramUser, async (req, res) => {
+  const telegramId = String(req.tg.user.id);
   res.json(userSettings.get(telegramId) || { telegramId, city: null, profile: 'office' });
 });
 
-app.post('/api/settings', (req, res) => {
-  const { telegramId, city, profile } = req.body || {};
-  if (!telegramId) return res.status(400).json({ error: 'telegramId is required' });
+app.post('/api/settings', requireTelegramUser, async (req, res) => {
+  const telegramId = String(req.tg.user.id);
+  const { city, profile } = req.body || {};
 
   const data = {
-    telegramId: String(telegramId),
+    telegramId,
     city: city ? String(city).trim() : null,
     profile: profile ? String(profile) : 'office',
   };
 
-  userSettings.set(String(telegramId), data);
+  userSettings.set(telegramId, data);
   res.json({ ok: true, data });
 });
 
