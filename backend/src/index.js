@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import fetch from 'node-fetch';
 import { Telegraf, Markup } from 'telegraf';
 import { validateInitData } from './telegramInitData.js';
 
@@ -18,38 +19,41 @@ const CORS_ORIGINS = (process.env.CORS_ORIGINS || '')
 
 const app = express();
 
-// ВАЖНО: для webhook Telegraf нужен JSON body
+// JSON для webhook Telegraf и API
 app.use(express.json());
 
 // CORS
 app.use(
   cors({
     origin: (origin, cb) => {
-      // Запросы без Origin (curl, сервер-сервер) — разрешаем
       if (!origin) return cb(null, true);
-
-      // Если список не задан — разрешаем всё (лучше задавать в проде!)
       if (CORS_ORIGINS.length === 0) return cb(null, true);
-
-      // Разрешаем только перечисленные домены
       if (CORS_ORIGINS.includes(origin)) return cb(null, true);
-
       return cb(new Error(`CORS blocked for origin: ${origin}`));
     },
     credentials: true,
   })
 );
 
-// Middleware для проверки Telegram initData
+// -------- Telegram initData middleware (исправленный) --------
 function requireTelegramUser(req, res, next) {
-  try {
-    const initData =
-      req.headers['x-telegram-init-data'] ||
-      req.body?.initData ||
-      req.query?.initData;
+  const headerValue = req.headers['x-telegram-init-data'];
 
-    const result = validateInitData(initData, process.env.BOT_TOKEN);
-    if (!result.user?.id) return res.status(401).json({ error: 'No user in initData' });
+  // 1) заголовок вообще не передан
+  if (typeof headerValue === 'undefined') {
+    return res.status(401).json({ error: 'X-Telegram-Init-Data header is required' });
+  }
+
+  // 2) передан, но пустая строка
+  if (typeof headerValue === 'string' && headerValue.trim().length === 0) {
+    return res.status(401).json({ error: 'initData is empty (open WebApp via bot button)' });
+  }
+
+  try {
+    const result = validateInitData(headerValue, process.env.BOT_TOKEN);
+    if (!result.user?.id) {
+      return res.status(401).json({ error: 'No user in initData' });
+    }
 
     req.tg = { user: result.user, initData: result.data };
     next();
@@ -58,90 +62,71 @@ function requireTelegramUser(req, res, next) {
   }
 }
 
-// --- Для старта без БД: храним настройки в памяти (обнулится при перезапуске)
-const userSettings = new Map();
+// -------- Память без БД --------
+// telegramId -> { settings: { telegramId, city, profile }, location: {...} }
+const userState = new Map();
 
-// --- API ---
+// -------- Простые API --------
 app.get('/health', (req, res) => res.json({ ok: true }));
 app.get('/', (req, res) => res.json({ ok: true, service: 'MeteoVip API' }));
 
+// Настройки (город/профиль)
 app.get('/api/settings', requireTelegramUser, async (req, res) => {
   const telegramId = String(req.tg.user.id);
-  res.json(userSettings.get(telegramId) || { telegramId, city: null, profile: 'office' });
+  const st = userState.get(telegramId);
+  const base = {
+    telegramId,
+    city: null,
+    profile: 'office',
+  };
+  res.json(st?.settings || base);
 });
 
 app.post('/api/settings', requireTelegramUser, async (req, res) => {
   const telegramId = String(req.tg.user.id);
   const { city, profile } = req.body || {};
 
-  const data = {
+  const st = userState.get(telegramId) || {};
+  const settings = {
     telegramId,
     city: city ? String(city).trim() : null,
     profile: profile ? String(profile) : 'office',
   };
 
-  userSettings.set(telegramId, data);
-  res.json({ ok: true, data });
+  userState.set(telegramId, {
+    ...st,
+    settings,
+  });
+
+  res.json({ ok: true, data: settings });
 });
 
-// --- Telegram bot ---
-const bot = new Telegraf(BOT_TOKEN);
-
-bot.start(async (ctx) => {
-  const text = 'Привет! Это MeteoVip. Нажми кнопку ниже, чтобы открыть настройки.';
-
-  // apiBase прокидываем в WebApp как параметр ?api=
-  const apiBase =
-    process.env.API_PUBLIC_URL ||
-    process.env.RENDER_EXTERNAL_URL ||
-    '';
-
-  const webappUrl = new URL(WEBAPP_URL);
-  if (apiBase) webappUrl.searchParams.set('api', apiBase);
-
-  await ctx.reply(
-    text,
-    Markup.inlineKeyboard([
-      Markup.button.webApp('Открыть MeteoVip', webappUrl.toString()),
-    ])
-  );
+// Debug: кто я
+app.get('/api/whoami', requireTelegramUser, (req, res) => {
+  res.json({ ok: true, user: req.tg.user });
 });
 
-bot.command('id', (ctx) => ctx.reply(`Ваш Telegram ID: ${ctx.from.id}`));
-
-// --- Webhook vs long polling ---
-const USE_WEBHOOK = (process.env.USE_WEBHOOK || 'true').toLowerCase() === 'true';
-
-async function start() {
-  if (USE_WEBHOOK) {
-    const publicUrl = process.env.RENDER_EXTERNAL_URL;
-    const path = '/telegram';
-
-    if (!publicUrl) {
-      console.warn('USE_WEBHOOK=true but RENDER_EXTERNAL_URL not set. Falling back to polling.');
-      await bot.launch();
-    } else {
-      // webhook endpoint
-      app.post(path, (req, res) => bot.handleUpdate(req.body, res));
-
-      // set webhook
-      await bot.telegram.setWebhook(`${publicUrl}${path}`);
-      console.log('Webhook set to', `${publicUrl}${path}`);
-    }
-
-    app.listen(PORT, () => console.log(`API listening on ${PORT}`));
-  } else {
-    // локально
-    await bot.launch();
-    app.listen(PORT, () => console.log(`API listening on ${PORT}`));
-  }
+// -------- Open-Meteo утилиты --------
+async function fetchJson(url) {
+  const r = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!r.ok) throw new Error(`Upstream error ${r.status}`);
+  return r.json();
 }
 
-start().catch((e) => {
-  console.error('Fatal start error:', e);
-  process.exit(1);
-});
+async function geocodeCity(name) {
+  const q = encodeURIComponent(name);
+  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${q}&count=1&language=ru&format=json`;
+  const data = await fetchJson(url);
+  const item = data?.results?.[0];
+  if (!item) return null;
+  return {
+    name: item.name,
+    admin1: item.admin1,
+    country: item.country,
+    latitude: item.latitude,
+    longitude: item.longitude,
+    timezone: item.timezone,
+  };
+}
 
-// корректное завершение (полезно локально)
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+async function forecastByCoords(lat, lon, timezone = 'auto
