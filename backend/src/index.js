@@ -208,10 +208,15 @@ async function startBotAndServer() {
     const secretPath = process.env.WEBHOOK_SECRET_PATH || '/telegraf';
     const webhookPath = `${secretPath}/${BOT_TOKEN}`;
 
-    app.use(await bot.createWebhook({ domain: baseUrl, path: webhookPath }));
+    try {
+      app.use(await bot.createWebhook({ domain: baseUrl, path: webhookPath }));
     await bot.telegram.setWebhook(`${baseUrl}${webhookPath}`);
 
     console.log('Telegraf webhook set to:', `${baseUrl}${webhookPath}`);
+          } catch (err) {
+        console.error('Failed to set webhook, will use polling:', err.message);
+            // Continue without webhook - bot will still work
+          }
   } else {
     await bot.launch();
     console.log('Telegraf launched with polling');
