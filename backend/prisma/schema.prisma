@@ -27,42 +27,79 @@ enum RuleType {
   WIND_GT
 }
 
+// NEW
+enum PresenceMode {
+  unknown
+  indoor
+  outdoor
+  transit
+}
+
+// NEW
+enum UserLocationType {
+  current
+  favorite
+  home
+  point
+  city
+}
+
 model User {
-  id           Int      @id @default(autoincrement())
-  telegramId   String   @unique
+  id           Int       @id @default(autoincrement())
+  telegramId   String    @unique
   username     String?
   firstName    String?
-  languageCode String   @default("ru")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  languageCode String    @default("ru")
+
+  // NEW: расширенные настройки
+  presenceMode   PresenceMode @default(unknown)
+  summaryEnabled Boolean      @default(true)
+  hazardsEnabled Boolean      @default(true)
+  workStart      String       @default("09:00")
+  workEnd        String       @default("18:00")
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   subscription Subscription?
   state        UserState?
   favorites    FavoriteLocation[]
   rules        AlertRule[]
   logs         NotificationLog[]
+
+  // NEW relations
+  locations    UserLocation[]
+  plans        UserPlan[]
+  alertEvents  AlertEvent[]
 }
 
 model Subscription {
-  id        Int      @id @default(autoincrement())
-  userId    Int      @unique
-  plan      Plan     @default(FREE)
+  id        Int       @id @default(autoincrement())
+  userId    Int       @unique
+  plan      Plan      @default(FREE)
   validTill DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model UserState {
-  id        Int      @id @default(autoincrement())
-  userId    Int      @unique
-  activeLat Float?
-  activeLon Float?
-  activeName String?
-  updatedAt DateTime @updatedAt
+  id         Int      @id @default(autoincrement())
+  userId     Int      @unique
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // legacy active location
+  activeLat  Float?
+  activeLon  Float?
+  activeName String?
+
+  // NEW: нормальная активная локация
+  activeLocationId Int?
+  activeLocation   UserLocation? @relation(fields: [activeLocationId], references: [id], onDelete: SetNull)
+
+  updatedAt  DateTime @updatedAt
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model FavoriteLocation {
@@ -74,10 +111,10 @@ model FavoriteLocation {
   lon       Float
   createdAt DateTime    @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@unique([userId, tag]) // гарантирует ровно 1 HOME на пользователя
+  @@unique([userId, tag])
 }
 
 model AlertRule {
@@ -91,7 +128,7 @@ model AlertRule {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, isEnabled])
 }
@@ -104,8 +141,75 @@ model NotificationLog {
   message   String
   sentAt    DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, ruleId, sentAt])
   @@unique([dedupeKey])
+}
+
+// ==========================================
+// NEW MODELS
+// ==========================================
+
+model UserLocation {
+  id        Int              @id @default(autoincrement())
+  userId    Int
+  type      UserLocationType @default(point)
+  name      String
+  lat       Float
+  lon       Float
+  timezone  String
+
+  isPending Boolean          @default(false)
+
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userStates UserState[]
+  alertEvents AlertEvent[]
+
+  @@index([userId, type])
+  @@index([userId, isPending])
+}
+
+model UserPlan {
+  id               Int      @id @default(autoincrement())
+  userId           Int
+  name             String
+  enabled          Boolean  @default(true)
+  minWindowMinutes Int      @default(60)
+  configJson       Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, enabled])
+}
+
+model PlanTemplate {
+  id                String   @id
+  name              String
+  description       String?
+  defaultConfigJson Json
+  version           Int      @default(1)
+}
+
+model AlertEvent {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  locationId Int?
+  kind       String
+  subtype    String?
+  severity   String?
+  dedupeKey  String   @unique
+  payload    Json?
+  sentAt     DateTime @default(now())
+
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location   UserLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, sentAt])
 }
