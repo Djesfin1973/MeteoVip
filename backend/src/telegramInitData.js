@@ -5,6 +5,7 @@ import crypto from 'crypto';
  * Парсит initData (querystring) в объект
  */
 export function parseInitData(initData) {
+  if (typeof initData !== 'string') return {};
   const params = new URLSearchParams(initData);
   const data = {};
   for (const [k, v] of params.entries()) data[k] = v;
@@ -13,12 +14,15 @@ export function parseInitData(initData) {
 
 /**
  * Проверяет подпись initData по алгоритму Telegram WebApp.
- * Возвращает объект user (из initData.user) и raw поля.
+ * Возвращает { ok: true, data, user }.
  *
  * Док: https://core.telegram.org/bots/webapps#validating-data-received-via-the-web-app
  */
 export function validateInitData(initData, botToken, maxAgeSeconds = 24 * 60 * 60) {
-  if (!initData) throw new Error('initData is required');
+  if (typeof initData !== 'string' || initData.trim().length === 0) {
+    throw new Error('initData is required');
+  }
+  if (!botToken) throw new Error('botToken is required');
 
   const data = parseInitData(initData);
   const receivedHash = data.hash;
@@ -47,7 +51,7 @@ export function validateInitData(initData, botToken, maxAgeSeconds = 24 * 60 * 6
     .update(botToken)
     .digest();
 
-  // expected_hash = HMAC_SHA256(data_check_string, secret_key) in hex
+  // expected_hash = HMAC_SHA256(secret_key, data_check_string) in hex
   const expectedHash = crypto
     .createHmac('sha256', secretKey)
     .update(dataCheckString)
@@ -60,6 +64,15 @@ export function validateInitData(initData, botToken, maxAgeSeconds = 24 * 60 * 6
     throw new Error('initData signature is invalid');
   }
 
-  const user = data.user ? JSON.parse(data.user) : null; // {id, username, ...}
+  // user JSON
+  let user = null;
+  if (data.user) {
+    try {
+      user = JSON.parse(data.user);
+    } catch {
+      throw new Error('initData.user is invalid JSON');
+    }
+  }
+
   return { ok: true, data, user };
 }
