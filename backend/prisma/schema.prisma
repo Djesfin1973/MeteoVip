@@ -51,6 +51,10 @@ model User {
   firstName    String?
   languageCode String    @default("ru")
 
+  // WebApp settings
+  city String?
+  profile String?
+
   // NEW: расширенные настройки
   presenceMode   PresenceMode @default(unknown)
   summaryEnabled Boolean      @default(true)
